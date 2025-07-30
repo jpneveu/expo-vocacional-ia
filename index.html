@@ -32,21 +32,6 @@
             min-height: 70vh; /* Minimum height for the app */
             position: relative; /* Needed for absolute positioning of splash screen */
         }
-        #splash-screen {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: #ffffff; /* Match app background */
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            z-index: 10; /* Ensure it's above chat content */
-            transition: opacity 0.5s ease-out; /* Smooth fade-out */
-            opacity: 1;
-        }
         #splash-screen.hidden {
             opacity: 0;
             pointer-events: none; /* Disable interaction when hidden */
@@ -300,7 +285,7 @@
 
             // Parse unordered list items (- Item)
             parsedMessage = parsedMessage.replace(/^( *)[*-] (.*)$/gm, (match, spaces, content) => {
-                const indentLevel = spaces.length / 2; // Assuming 2 spaces per indent level
+                const indentLevel = spaces.length / 2; 
                 return `<li style="margin-left: ${indentLevel * 1.5}rem;">${content}</li>`;
             });
 
@@ -359,8 +344,7 @@
             chatMessagesDiv.innerHTML = '';
             displayMessage(`${EMOJI_RESET} Reiniciando la conversación...`, 'bot');
             showConfirmationButtons(false); 
-            // After reset, display the initial static message again
-            setTimeout(() => displayStaticWelcomeMessage(), 1000); 
+            displayStaticWelcomeMessage(); // Display static welcome message after reset
         };
 
         // Function to send message
@@ -378,9 +362,7 @@
             // Check for reset command
             if (message.toLowerCase() === 'empezar de nuevo' || message.toLowerCase() === 'reset') {
                 await resetConversation();
-                sendButton.disabled = false;
-                loadingIndicator.classList.remove('active');
-                return;
+                return; // Exit after reset
             }
 
             await getBotResponse(message);
@@ -388,17 +370,8 @@
             loadingIndicator.classList.remove('active');
         };
 
-        // Function to get bot response from Vercel Serverless Function
-        const getBotResponse = async (userMessage) => {
-            // Check if running in a local file system or Canvas blob URL
-            const isLocalOrCanvas = window.location.protocol === 'file:' || window.location.protocol === 'blob:';
-
-            if (isLocalOrCanvas) {
-                displayMessage("Disculpá, la funcionalidad de IA requiere que la aplicación esté desplegada en un servidor (como Vercel) para funcionar. Por favor, desplegá la aplicación y asegurate de que la clave API esté configurada en Vercel.", 'bot');
-                return; 
-            }
-
-            // Construct the prompt based on the current phase and user profile
+        // Function to build the full prompt for Gemini
+        const buildFullPrompt = (userMessage) => {
             let prompt = `
             Eres **Explora tu vocación con IA - Expo carreras 2026**, un asistente vocacional, diseñado para guiar a estudiantes de 5º y 6º año de la secundaria en la provincia de La Pampa, Argentina. Tu misión es facilitar un proceso de autodescubrimiento y reflexión que conecte la identidad personal del estudiante con la exploración de la oferta académica superior de manera accesible, clara y profesional. Eres una herramienta de apoyo para el primer paso de la orientación, no un reemplazo de un orientador humano.
 
@@ -452,23 +425,17 @@
             // Append specific instructions based on the current phase
             switch (currentPhase) {
                 case 'Fase 0':
-                    prompt += `
-                    **Paso 0.1:** ${EMOJI_WELCOME} Hola, soy **Explora tu vocación, tu asistente virtual en la Expo Carreras 2026**.
-                    Importante: Este asistente fue diseñado con Inteligencia Artificial (IA) para acompañarte en la exploración de tus intereses y posibles caminos formativos. No reemplaza el asesoramiento personalizado de profesionales en orientación vocacional. Puede contener errores o interpretaciones limitadas. Te recomendamos complementar esta experiencia con espacios de reflexión, diálogo y consulta humana.
-                    **Pregunta:** **¿Qué actividades te entusiasman o te hacen perder la noción del tiempo cuando las hacés?**
-                    `;
+                    // This phase is handled by static message. User's first input moves to Fase 1.1
+                    // The prompt for the LLM will be based on the user's first response to the static message.
                     break;
-                case 'Fase 1.1': // This phase now handles the response to the initial question
-                    // User just responded to the initial welcome+question, now transition to the next logical step.
-                    // No new question is asked by the bot in this prompt, as the previous phase already asked the first question.
-                    // The updatePhase function will handle the transition to Fase 1.2
+                case 'Fase 1.1': 
                     prompt += `
                     El usuario acaba de responder a la pregunta inicial: "${userMessage}".
                     Analiza su respuesta.
                     Si la respuesta es muy breve, general, o parece que el usuario necesita más ideas (ej. 'no sé', 'muchas cosas', 'lo normal'), entonces **brinda los ejemplos detallados**: "Por ejemplo, editar videos, reparar cosas, ayudar a otros, escribir historias, programar juegos, cuidar plantas, diseñar ropa, investigar temas de ciencia, practicar deportes, organizar eventos o aprender idiomas, entre muchas otras." Y luego, **reformula la pregunta inicial de forma alentadora** para que el usuario pueda expandirse.
                     Si la respuesta es clara y específica, entonces **continúa el diálogo en forma natural** y pasa a la siguiente pregunta de la secuencia (Paso 1.2).
                     `;
-                    userProfile.actividades_ocio = userMessage; // Store response from previous phase
+                    userProfile.actividades_ocio = userMessage; 
                     break;
                 case 'Fase 1.2':
                     prompt += `
@@ -506,22 +473,22 @@
                     `;
                     userProfile.carreras_preexistentes = userMessage;
                     break;
-                case 'Fase 3.1': // This phase is now the "Resumen General"
+                case 'Fase 3.1': 
                     prompt += `
                     **Paso 3.1:** ${EMOJI_SUMMARY_CONFIRMATION} Resumen General. Pide validación final del perfil completo.
                     Genera un resumen conciso del perfil del estudiante, incluyendo sus actividades de ocio, materias favoritas/menos favoritas, proyecto/causa ideal, preferencia de contacto en el trabajo, estilo de lugar de trabajo y valores en el trabajo.
                     **Pregunta:** **¿Es correcto este resumen de tu perfil?**
                     **Añade al final de tu respuesta el marcador oculto: ---CONFIRMAR_SI_NO---**
                     `;
-                    userProfile.confirmacion_perfil = userMessage; // Store confirmation
+                    userProfile.confirmacion_perfil = userMessage; 
                     break;
-                case 'Fase 3.2': // This phase now handles the logistical filter, after profile confirmation
+                case 'Fase 3.2': 
                     prompt += `
                     **Paso 3.2:** ${EMOJI_GUIDE_QUESTION} Para afinar las opciones, **¿preferís quedarte en La Pampa, te interesa estudiar a distancia (online), o estarías dispuesto/a a mudarte a otra provincia?**
                     `;
-                    userProfile.preferencias_logisticas = userMessage; // Store logistical preference
+                    userProfile.preferencias_logisticas = userMessage; 
                     break;
-                case 'Fase 4.1': // This phase suggests areas based on the profile and logistical preference
+                case 'Fase 4.1': 
                     prompt += `
                     **Paso 4.1:** ${EMOJI_IDEA_SUGGESTION} Sugiere de 2 a 3 Áreas de Conocimiento y pregunta cuál explorar.
                     Basado en el perfil completo del estudiante y su preferencia logística (${userProfile.preferencias_logisticas}), sugiere 2 o 3 áreas de conocimiento generales (ej. Ciencias de la Salud, Tecnología, Artes y Diseño, Ciencias Sociales, Educación, Ciencias Agrarias).
@@ -529,9 +496,9 @@
                     **Pregunta al estudiante cuál de esas áreas le gustaría explorar primero.**
                     **IMPORTANTE:** Guarda las áreas sugeridas en la variable 'suggestedAreas' para referencia futura.
                     `;
-                    userProfile.preferencias_logisticas = userMessage; // Store logistical preference
+                    userProfile.preferencias_logisticas = userMessage; 
                     break;
-                case 'Fase 4.2': // This phase is triggered when user selects an area
+                case 'Fase 4.2': 
                     prompt += `
                     **Paso 4.2:** ${EMOJI_ACADEMIC_INFO} Proporciona un listado de carreras específicas del área elegida.
                     El usuario ha elegido el área: "${userMessage}".
@@ -547,17 +514,17 @@
                         * Tecnicatura Superior en Redes Informáticas: (descripción breve) [Enlace al sitio oficial]
                     **Si el usuario no eligió una de las áreas sugeridas, pídele que elija una de las opciones o que aclare su interés.**
                     `;
-                    selectedArea = userMessage; // Store the selected area
+                    selectedArea = userMessage; 
                     break;
-                case 'Fase 4.3': // This phase is now the reflection on options
+                case 'Fase 4.3': 
                     prompt += `
                     **Paso 4.3:** ${EMOJI_REFLECTION} Plantea una pregunta abierta para fomentar la reflexión sobre las opciones.
                     Ejemplo: "De estas carreras que te mencioné, ¿hay alguna que te genere más curiosidad o que te llame la atención? ¿Por qué?"
                     **Asegúrate de que esta pregunta esté en negrita.**
                     `;
-                    userProfile.carreras_sugeridas_area = userMessage; // Store the list of careers suggested by the bot
+                    userProfile.carreras_sugeridas_area = userMessage; 
                     break;
-                case 'Fase 4.4': // This phase is now offering to deepen
+                case 'Fase 4.4': 
                     prompt += `
                     **Paso 4.4:** Ofrece profundizar en la carrera que más le interesó (materias, duración, etc.).
                     El usuario ha expresado interés en: "${userMessage}".
@@ -565,7 +532,7 @@
                     `;
                     userProfile.carrera_interes_fase4 = userMessage;
                     break;
-                case 'Fase 5.1': // This phase is now asking to explore more or close
+                case 'Fase 5.1': 
                     prompt += `
                     **Paso 5.1:** Pregunta si quiere explorar otra de las áreas sugeridas o si tiene alguna otra duda.
                     Recuerda las áreas sugeridas previamente: ${JSON.stringify(suggestedAreas)}.
@@ -573,7 +540,7 @@
                     `;
                     userProfile.profundizacion_carrera = userMessage;
                     break;
-                case 'Fase 5.2': // This phase is now the final summary and next steps
+                case 'Fase 5.2': 
                     prompt += `
                     **Paso 5.2:** Para cerrar, ofrece un resumen de las conclusiones y sugiere los próximos pasos prácticos (visitar sitios web, buscar testimonios, etc.).
                     Importante: Este asistente fue diseñado con Inteligencia Artificial para acompañarte en la exploración de tus intereses y posibles caminos formativos. No reemplaza el asesoramiento personalizado de profesionales en orientación vocacional. Puede contener errores o interpretaciones limitadas. Te recomendamos complementar esta experiencia con espacios de reflexión, diálogo y consulta humana.
@@ -581,7 +548,7 @@
                     `;
                     userProfile.exploracion_adicional = userMessage;
                     break;
-                case 'Fase 5.3': // This phase is now the disclaimer
+                case 'Fase 5.3': 
                     prompt += `
                     **Paso 5.3:** ${EMOJI_PROFESSIONAL_CLARIFICATION} Aclaración Final Importante.
                     Incluye siempre la siguiente aclaración, presentada de forma destacada:
@@ -590,153 +557,157 @@
                     `;
                     userProfile.cierre_confirmado = userMessage;
                     break;
-                case 'Fase 5.4': // This phase is now the reset option
+                case 'Fase 5.4': 
                     prompt += `
                     **Paso 5.4:** ${EMOJI_RESET} Ofrece la opción de reseteo. Presenta la instrucción de forma clara, como un enlace de texto.
                     Texto: "Si en algún momento querés volver a explorar todo desde cero con otras ideas, podés hacerlo. Para eso, simplemente escribí la frase **empezar de nuevo**."
                     Luego, procede al Paso 5.5.
                     `;
                     break;
-                case 'Fase 5.5': // This phase is now the farewell
+                case 'Fase 5.5': 
                     prompt += `
                     **Paso 5.5:** Ahora sí, despídete con un mensaje alentador y el emoji ${EMOJI_WELCOME}.
                     Ejemplo: "¡Fue un gusto conversar con vos! Te deseo mucho éxito en tu búsqueda y en el camino que elijas. ¡Hasta la próxima! 👋"
                     `;
                     break;
                 case 'Fase 5.6':
-                    // End of conversation, or user might restart
-                    // No phase change, waiting for reset command
                     break;
                 default:
                     console.warn("Unhandled phase transition:", current);
                     break;
             }
-
-            // Add previous conversation history to the prompt for context
-            // Construimos el historial de chat para Gemini, incluyendo el prompt actual del usuario
-            let chatForGemini = [];
-            conversationHistory.forEach(msg => {
-                chatForGemini.push({ role: msg.sender === 'user' ? 'user' : 'model', parts: [{ text: msg.text }] });
-            });
-            // El prompt del usuario actual se añade como la última parte de la conversación
-            chatForGemini.push({ role: "user", parts: [{ text: prompt }] });
-
-            try {
-                // Aquí el payload se construye para enviar el prompt principal y el historial de chat
-                const payload = { 
-                    userPrompt: prompt, // El prompt principal que se le pide a Gemini
-                    chatHistory: chatForGemini // El historial completo de la conversación para contexto
-                };
-                
-                const apiUrl = '/api/chat'; // Apuntamos a nuestra función serverless
-
-                // Implementar un timeout para la llamada fetch
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 segundos de timeout
-
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
-                    signal: controller.signal // Asignar el signal del AbortController
-                });
-
-                clearTimeout(timeoutId); // Limpiar el timeout si la fetch se completa a tiempo
-
-                const result = await response.json();
-
-                if (response.ok && result.candidates && result.candidates.length > 0 &&
-                    result.candidates[0].content && result.candidates[0].content.parts &&
-                    result.candidates[0].content.parts.length > 0) {
-                    
-                    let botResponse = result.candidates[0].content.parts[0].text;
-
-                    // Check for the hidden marker to show confirmation buttons
-                    if (botResponse.includes('---CONFIRMAR_SI_NO---')) {
-                        botResponse = botResponse.replace('---CONFIRMAR_SI_NO---', '').trim(); // Remove marker
-                        setTimeout(() => showConfirmationButtons(true), 300); // Show buttons with a slight delay
-                    } else {
-                        showConfirmationButtons(false); // Ensure buttons are hidden if not a confirmation
-                    }
-
-                    return botResponse; // Return the actual response text on success
-                } else {
-                    const errorMessageText = result.error ? `Error del servidor: ${result.error.message || result.error}` : 'Respuesta inesperada de la IA.';
-                    console.error("Error from serverless function or unexpected Gemini response:", result);
-                    return null; // Indicate failure
-                }
-            } catch (error) {
-                if (error.name === 'AbortError') {
-                    console.error("Error de conexión: La solicitud ha excedido el tiempo de espera (timeout).", error);
-                } else {
-                    console.error("Error llamando a la función serverless:", error);
-                }
-                return null; // Indicate failure
-            } finally {
-                // El estado de carga se gestiona en startInitialChat o sendMessage
-            }
+            return prompt; // Return the constructed prompt
         };
 
-        // Function to handle the initial chat startup with retries
-        const startInitialChat = async () => {
+
+        // Function to get bot response from Vercel Serverless Function
+        const getBotResponse = async (userMessage) => {
+            // Check if running in a local file system or Canvas blob URL
             const isLocalOrCanvas = window.location.protocol === 'file:' || window.location.protocol === 'blob:';
             if (isLocalOrCanvas) {
                 displayMessage("Disculpá, la funcionalidad de IA requiere que la aplicación esté desplegada en un servidor (como Vercel) para funcionar. Por favor, desplegá la aplicación y asegurate de que la clave API esté configurada en Vercel.", 'bot');
+                return null; 
+            }
+
+            try {
+                // Send the full prompt string to the serverless function
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: buildFullPrompt(userMessage) }) // Sending only the 'prompt' property
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    console.error("Error from serverless function:", errorData);
+                    throw new Error(errorData.error || 'Error en la respuesta del servidor.');
+                }
+
+                const data = await response.json();
+                
+                // Extract the text from the Gemini response structure
+                if (data.candidates && data.candidates.length > 0 &&
+                    data.candidates[0].content && data.candidates[0].content.parts &&
+                    data.candidates[0].content.parts.length > 0) {
+                    return data.candidates[0].content.parts[0].text;
+                } else {
+                    console.error("Unexpected Gemini response structure:", data);
+                    throw new Error('Respuesta inesperada de la IA.');
+                }
+
+            } catch (error) {
+                console.error("Error calling serverless function:", error);
+                displayMessage(`Disculpá, no pude generar una respuesta. ${error.message || 'Hubo un problema de conexión.'} Por favor, intentá de nuevo más tarde.`, 'bot');
+                return null; 
+            } finally {
                 sendButton.disabled = false;
                 loadingIndicator.classList.remove('active');
-                return;
             }
-
-            sendButton.disabled = true; // Disable button during initial load
-            loadingIndicator.classList.add('active'); // Show loading indicator
-
-            let finalBotResponse = null;
-            let callSuccessful = false;
-
-            for (let i = 0; i <= MAX_INITIAL_RETRIES; i++) {
-                try {
-                    // La llamada inicial no tiene userMessage, pero necesita el prompt de sistema
-                    // getBotResponse construirá el prompt de sistema basado en currentPhase
-                    const responseText = await getBotResponse(''); 
-                    if (responseText) {
-                        finalBotResponse = responseText;
-                        callSuccessful = true;
-                        break; // Exit loop if successful
-                    }
-                } catch (e) {
-                    // getBotResponse ya maneja los console.error
-                }
-
-                if (!callSuccessful && i < MAX_INITIAL_RETRIES) {
-                    console.log(`Reintentando la llamada inicial (${i + 1}/${MAX_INITIAL_RETRIES})...`);
-                    await delay(RETRY_DELAY_MS);
-                }
-            }
-
-            if (callSuccessful) {
-                // ONLY display the message ONCE after a successful response is obtained
-                displayMessage(finalBotResponse, 'bot');
-                conversationHistory.push({ text: finalBotResponse, sender: 'bot' });
-                updatePhase(currentPhase, '', finalBotResponse); 
-            } else {
-                // Only display error if all retries failed
-                displayMessage("Disculpá, no pude generar una respuesta. Hubo un problema de conexión. Por favor, verificá tu conexión a internet.", 'bot');
-            }
-
-            sendButton.disabled = false;
-            loadingIndicator.classList.remove('active');
         };
 
-
-        // Event Listeners
-        sendButton.addEventListener('click', () => sendMessage());
-        userInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                sendMessage();
+        // Function to update the conversation phase
+        const updatePhase = (current, userMsg, botResponse) => {
+            switch (current) {
+                case 'Fase 0': 
+                    currentPhase = 'Fase 1.1'; 
+                    break;
+                case 'Fase 1.1': 
+                    if (botResponse.includes('Por ejemplo, editar videos')) { 
+                        currentPhase = 'Fase 1.1'; 
+                    } else {
+                        currentPhase = 'Fase 1.2'; 
+                    }
+                    break;
+                case 'Fase 1.2': 
+                    currentPhase = 'Fase 1.3'; 
+                    break;
+                case 'Fase 1.3': 
+                    currentPhase = 'Fase 1.4'; 
+                    break;
+                case 'Fase 1.4': 
+                    currentPhase = 'Fase 2.1'; 
+                    break;
+                case 'Fase 2.1': 
+                    currentPhase = 'Fase 2.2'; 
+                    break;
+                case 'Fase 2.2': 
+                    currentPhase = 'Fase 2.3'; 
+                    break;
+                case 'Fase 2.3': 
+                    currentPhase = 'Fase 3.1'; 
+                    break;
+                case 'Fase 3.1': 
+                    if (userMsg.toLowerCase().includes('sí') || userMsg.toLowerCase().includes('correcto') || userMsg.toLowerCase().includes('si')) {
+                        currentPhase = 'Fase 3.2'; // Move to logistical filter
+                    } else {
+                        currentPhase = 'Fase 3.1'; // Re-ask for clarification
+                    }
+                    break;
+                case 'Fase 3.2': 
+                    currentPhase = 'Fase 4.1'; 
+                    break;
+                case 'Fase 4.1': 
+                    currentPhase = 'Fase 4.2'; 
+                    break;
+                case 'Fase 4.2': 
+                    currentPhase = 'Fase 4.3'; 
+                    break;
+                case 'Fase 4.3': 
+                    currentPhase = 'Fase 4.4'; 
+                    break;
+                case 'Fase 4.4': 
+                    currentPhase = 'Fase 5.1'; 
+                    break;
+                case 'Fase 5.1': 
+                    currentPhase = 'Fase 5.2'; 
+                    break;
+                case 'Fase 5.2': 
+                    currentPhase = 'Fase 5.3'; 
+                    break;
+                case 'Fase 5.3': 
+                    currentPhase = 'Fase 5.4'; 
+                    break;
+                case 'Fase 5.4': 
+                    currentPhase = 'Fase 5.5'; 
+                    break;
+                case 'Fase 5.5': 
+                    currentPhase = 'Fase 5.6'; 
+                    break;
+                case 'Fase 5.6':
+                    break;
+                default:
+                    console.warn("Unhandled phase transition:", current);
+                    break;
             }
-        });
-        yesButton.addEventListener('click', () => sendMessage('Sí'));
-        noButton.addEventListener('click', () => sendMessage('No'));
+        };
+
+        // Static Welcome Message Display Function
+        const displayStaticWelcomeMessage = () => {
+            const welcomeMessage = `¡Hola! Soy **Explora tu vocación, tu asistente virtual en la Expo Carreras 2026**. Importante: Este asistente fue diseñado con Inteligencia Artificial (IA) para acompañarte en la exploración de tus intereses y posibles caminos formativos. No reemplaza el asesoramiento personalizado de profesionales en orientación vocacional. Puede contener errores o interpretaciones limitadas. Te recomendamos complementar esta experiencia con espacios de reflexión, diálogo y consulta humana. 🧭 Para empezar, contame, **¿qué actividades te entusiasman o te hacen perder la noción del tiempo cuando las hacés?**`;
+            displayMessage(welcomeMessage, 'bot');
+            conversationHistory.push({ text: welcomeMessage, sender: 'bot' });
+            currentPhase = 'Fase 0'; // Ensure phase is correctly set for the first user input
+        };
 
 
         // Initial setup on window load
@@ -745,7 +716,7 @@
             setTimeout(() => {
                 splashScreen.classList.add('hidden');
                 chatContent.classList.add('visible');
-                startInitialChat();
+                displayStaticWelcomeMessage(); // Display the static welcome message immediately
             }, 4000); // Display splash screen for 4 seconds
         };
     </script>
