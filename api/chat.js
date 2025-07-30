@@ -8,14 +8,14 @@ export default async function handler(request, response) {
         return response.status(405).json({ message: 'Method Not Allowed' });
     }
 
-    // 2. Obtener el prompt y el historial de chat del cuerpo de la solicitud
-    // ¡CAMBIO CLAVE AQUÍ! Esperamos 'userPrompt' y 'chatHistory'
-    const { userPrompt, chatHistory } = request.body;
+    // 2. Obtener el 'prompt' completo del cuerpo de la solicitud
+    // ¡CAMBIO CLAVE AQUÍ! Solo esperamos una propiedad 'prompt'
+    const { prompt } = request.body;
 
-    // Verificar que al menos el prompt principal esté presente
-    if (!userPrompt) {
-        console.error('Error: userPrompt is missing in the request body.');
-        return response.status(400).json({ error: 'El prompt principal está vacío o falta.' });
+    // Verificar que el prompt esté presente
+    if (!prompt) {
+        console.error('Error: El prompt está vacío o falta en el cuerpo de la solicitud.');
+        return response.status(400).json({ error: 'El prompt está vacío o falta.' });
     }
 
     // 3. Obtener la clave API de las variables de entorno de Vercel
@@ -30,13 +30,10 @@ export default async function handler(request, response) {
 
     try {
         // Construir el payload para la API de Gemini
-        // El prompt principal va primero, luego el historial de chat
-        const contents = [{ role: "user", parts: [{ text: userPrompt }] }];
-        if (chatHistory && Array.isArray(chatHistory)) {
-            contents.push(...chatHistory); // Añadir el historial si existe
-        }
-
-        const payload = { contents: contents };
+        // El prompt completo se envía como la única parte de la conversación
+        const payload = {
+            contents: [{ parts: [{ text: prompt }] }]
+        };
 
         // 4. Realizar la llamada server-to-server a la API de Gemini
         const geminiResponse = await fetch(apiUrl, {
@@ -60,7 +57,7 @@ export default async function handler(request, response) {
         }
 
         const data = await geminiResponse.json();
-        
+
         // 5. Enviar la respuesta completa de Gemini de vuelta al frontend
         return response.status(200).json(data);
 
