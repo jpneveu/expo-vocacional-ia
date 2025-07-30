@@ -1,20 +1,23 @@
 // api/chat.js
 // Este archivo es una función serverless de Node.js para Vercel.
-// Maneja las llamadas a la API de Gemini de forma segura, usando una variable de entorno.
+// Actúa como un proxy seguro a la API de Gemini.
 
 export default async function handler(request, response) {
-    // Asegura que solo se acepten solicitudes POST
+    // 1. Solo permitir solicitudes POST por seguridad
     if (request.method !== 'POST') {
-        return response.status(405).json({ error: 'Método no permitido. Solo se aceptan POST.' });
+        return response.status(405).json({ message: 'Método no permitido' });
     }
 
-    // Extrae el historial de chat y el prompt del cuerpo de la solicitud
+    // 2. Obtener el historial de chat y el prompt del cuerpo de la solicitud
     const { chatHistory, prompt } = request.body;
 
-    // Obtiene la clave API de las variables de entorno de Vercel
+    if (!prompt && (!chatHistory || chatHistory.length === 0)) {
+        return response.status(400).json({ error: 'Prompt o historial de chat missing.' });
+    }
+
+    // 3. Obtener la clave API de las variables de entorno de Vercel
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-        // Si la clave API no está configurada, devuelve un error 500
         console.error('Error: GEMINI_API_KEY no configurada en las variables de entorno de Vercel.');
         return response.status(500).json({ error: 'La clave API de Gemini no está configurada en el servidor.' });
     }
@@ -23,41 +26,39 @@ export default async function handler(request, response) {
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
     try {
-        // Prepara el payload para la API de Gemini
-        const payload = { contents: chatHistory };
+        // Preparar el payload para la API de Gemini
+        const payload = { contents: chatHistory }; // Usamos el historial completo para el contexto
 
-        // Realiza la llamada a la API de Gemini
-        const apiResponse = await fetch(apiUrl, {
+        // 4. Realizar la llamada server-to-server a la API de Gemini
+        const geminiResponse = await fetch(apiUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
         });
 
-        // Verifica si la respuesta de la API fue exitosa
-        if (!apiResponse.ok) {
-            const errorText = await apiResponse.text();
-            console.error('Respuesta de error de la API de Gemini:', errorText);
-            return response.status(apiResponse.status).json({ error: `Error de la API de Gemini: ${errorText}` });
+        // Manejar posibles errores de la API de Gemini
+        if (!geminiResponse.ok) {
+            const errorText = await geminiResponse.text();
+            console.error("Error de la API de Gemini:", errorText);
+            // Intentamos parsear el error para dar más detalle si es JSON
+            try {
+                const errorJson = JSON.parse(errorText);
+                return response.status(geminiResponse.status).json({ error: errorJson.error.message || 'Error desconocido de la API de Gemini' });
+            } catch (e) {
+                return response.status(geminiResponse.status).json({ error: `Error de la API de Gemini: ${errorText}` });
+            }
         }
 
-        // Parsea la respuesta JSON de la API de Gemini
-        const result = await apiResponse.json();
+        const result = await geminiResponse.json();
 
-        // Extrae el texto de la respuesta del bot
-        if (result.candidates && result.candidates.length > 0 &&
-            result.candidates[0].content && result.candidates[0].content.parts &&
-            result.candidates[0].content.parts.length > 0) {
-            const botResponse = result.candidates[0].content.parts[0].text;
-            // Devuelve la respuesta del bot al cliente
-            return response.status(200).json({ text: botResponse });
-        } else {
-            // Maneja casos donde la estructura de la respuesta es inesperada
-            console.error("Estructura de respuesta inesperada de Gemini:", result);
-            return response.status(500).json({ error: "Respuesta inesperada de la API de Gemini." });
-        }
+        // 5. Enviar la respuesta completa de Gemini de vuelta al frontend
+        // ¡CAMBIO CLAVE AQUÍ! Devolvemos 'result' completo, no solo 'result.text'
+        return response.status(200).json(result);
+
     } catch (error) {
-        // Manejo de errores de red o del servidor
-        console.error("Error en la función serverless:", error);
-        return response.status(500).json({ error: "Error interno del servidor al procesar la solicitud." });
+        console.error("Error interno del servidor:", error);
+        return response.status(500).json({ error: error.message || 'Error interno del servidor al procesar la solicitud.' });
     }
 }
