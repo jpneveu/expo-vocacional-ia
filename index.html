@@ -393,6 +393,16 @@
 
         // Function to get bot response from Vercel Serverless Function
         const getBotResponse = async (userMessage) => {
+            // Check if running in a local file system or Canvas blob URL
+            const isLocalOrCanvas = window.location.protocol === 'file:' || window.location.protocol === 'blob:';
+
+            if (isLocalOrCanvas) {
+                displayMessage("Disculpá, la funcionalidad de IA requiere que la aplicación esté desplegada en un servidor (como Vercel) para funcionar. Por favor, desplegá la aplicación y asegurate de que la clave API esté configurada en Vercel.", 'bot');
+                sendButton.disabled = false;
+                loadingIndicator.classList.remove('active');
+                return; // Exit the function early
+            }
+
             // Construct the prompt based on the current phase and user profile
             let prompt = `
             Eres **Explora tu vocación con IA - Expo carreras 2026**, un asistente vocacional, diseñado para guiar a estudiantes de 5º y 6º año de la secundaria en la provincia de La Pampa, Argentina. Tu misión es facilitar un proceso de autodescubrimiento y reflexión que conecte la identidad personal del estudiante con la exploración de la oferta académica superior de manera accesible, clara y profesional. Eres una herramienta de apoyo para el primer paso de la orientación, no un reemplazo de un orientador humano.
@@ -616,13 +626,7 @@
 
             try {
                 // Construct the full API URL.
-                // If running in a Vercel-like environment (http or https), use relative path.
-                // For local file system or blob URLs (like in Canvas preview),
-                // provide a placeholder absolute URL. This will prevent the "Failed to parse URL" error,
-                // but the API call itself will only succeed once deployed to Vercel and the URL is updated.
-                const apiUrl = (window.location.protocol === 'http:' || window.location.protocol === 'https:')
-                    ? '/api/chat'
-                    : 'https://expo-vocacional-ia.vercel.app'; // IMPORTANT: Reemplaza con la URL real de tu despliegue en Vercel después de desplegar.
+                const apiUrl = '/api/chat'; // Siempre usamos la ruta relativa en Vercel
 
                 const response = await fetch(apiUrl, {
                     method: 'POST',
@@ -630,10 +634,14 @@
                     body: JSON.stringify({ chatHistory: apiChatHistory, prompt: prompt }) // Pass full history and current prompt
                 });
 
+                // Aquí es donde el cambio es crucial: esperamos la respuesta COMPLETA de Gemini
                 const result = await response.json();
 
-                if (response.ok && result.text) {
-                    let botResponse = result.text;
+                if (response.ok && result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    
+                    let botResponse = result.candidates[0].content.parts[0].text;
 
                     // Check for the hidden marker to show confirmation buttons
                     if (botResponse.includes('---CONFIRMAR_SI_NO---')) {
@@ -650,12 +658,15 @@
                     updatePhase(currentPhase, userMessage, botResponse);
 
                 } else {
-                    console.error("Error from serverless function:", result.error || "Unknown error");
+                    console.error("Error from serverless function or unexpected Gemini response:", result.error || "Unknown error", result);
                     displayMessage("Disculpá, no pude generar una respuesta. Hubo un problema con el servidor. Por favor, intentá de nuevo más tarde.", 'bot');
                 }
             } catch (error) {
                 console.error("Error calling serverless function:", error);
                 displayMessage("Disculpá, no pude generar una respuesta. Hubo un problema de conexión. Por favor, verificá tu conexión a internet.", 'bot');
+            } finally {
+                 sendButton.disabled = false;
+                 loadingIndicator.classList.remove('active');
             }
         };
 
