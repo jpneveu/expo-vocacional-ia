@@ -263,7 +263,6 @@
         let expectingConfirmation = false; // New state to manage confirmation buttons
 
         // Variables para el manejo de reintentos en la llamada inicial
-        let initialCallRetries = 0;
         const MAX_INITIAL_RETRIES = 2; // Número máximo de reintentos para la llamada inicial
         const RETRY_DELAY_MS = 1500; // Retraso en milisegundos entre reintentos
 
@@ -368,7 +367,7 @@
             chatMessagesDiv.innerHTML = '';
             displayMessage(`${EMOJI_RESET} Reiniciando la conversación...`, 'bot');
             showConfirmationButtons(false); // Hide buttons on reset
-            setTimeout(() => getBotResponse(''), 1000); // Start new conversation
+            // No llamar a getBotResponse aquí, ya que el flujo inicial lo manejará
         };
 
         // Function to send message
@@ -392,20 +391,27 @@
             }
 
             await getBotResponse(message);
-            // sendButton.disabled = false; // Moved to finally block
-            // loadingIndicator.classList.remove('active'); // Moved to finally block
         };
 
+        // Helper function for delay
+        const delay = ms => new Promise(res => setTimeout(res, ms));
+
         // Function to get bot response from Vercel Serverless Function
-        const getBotResponse = async (userMessage) => {
+        const getBotResponse = async (userMessage, isInitialCall = false, retryCount = 0) => {
             // Check if running in a local file system or Canvas blob URL
             const isLocalOrCanvas = window.location.protocol === 'file:' || window.location.protocol === 'blob:';
 
             if (isLocalOrCanvas) {
                 displayMessage("Disculpá, la funcionalidad de IA requiere que la aplicación esté desplegada en un servidor (como Vercel) para funcionar. Por favor, desplegá la aplicación y asegurate de que la clave API esté configurada en Vercel.", 'bot');
-                // sendButton.disabled = false; // Moved to finally block
-                // loadingIndicator.classList.remove('active'); // Moved to finally block
-                return; // Exit the function early
+                sendButton.disabled = false;
+                loadingIndicator.classList.remove('active');
+                return;
+            }
+
+            // Only set loading state if it's the very first attempt of a call or a user-initiated call
+            if (!isInitialCall || retryCount === 0) {
+                sendButton.disabled = true;
+                loadingIndicator.classList.add('active');
             }
 
             // Construct the prompt based on the current phase and user profile
@@ -666,22 +672,29 @@
                     // Si la respuesta no es OK o no tiene la estructura esperada, mostramos un error más específico
                     const errorMessageText = result.error ? `Error del servidor: ${result.error.message || result.error}` : 'Respuesta inesperada de la IA.';
                     console.error("Error from serverless function or unexpected Gemini response:", result);
-                    displayMessage(`Disculpá, no pude generar una respuesta. ${errorMessageText} Por favor, intentá de nuevo más tarde.`, 'bot');
+                    
+                    // Solo mostrar el error al usuario si no es una llamada inicial que se va a reintentar
+                    if (!isInitialCall || retryCount >= MAX_INITIAL_RETRIES) {
+                        displayMessage(`Disculpá, no pude generar una respuesta. ${errorMessageText} Por favor, intentá de nuevo más tarde.`, 'bot');
+                    }
                 }
             } catch (error) {
                 console.error("Error calling serverless function:", error);
                 // Lógica de reintento solo para la llamada inicial
-                if (currentPhase === 'Fase 0' && !userMessage && initialCallRetries < MAX_INITIAL_RETRIES) {
-                    initialCallRetries++;
-                    console.log(`Reintentando la llamada inicial (${initialCallRetries}/${MAX_INITIAL_RETRIES})...`);
-                    setTimeout(() => getBotResponse(''), RETRY_DELAY_MS);
-                    return; // No mostrar el error todavía, solo reintentar
+                if (isInitialCall && retryCount < MAX_INITIAL_RETRIES) {
+                    console.log(`Reintentando la llamada inicial (${retryCount + 1}/${MAX_INITIAL_RETRIES})...`);
+                    await delay(RETRY_DELAY_MS); // Espera antes de reintentar
+                    getBotResponse(userMessage, isInitialCall, retryCount + 1);
+                    return; // Importante: salir para no ejecutar el finally ni mostrar error prematuro
                 }
                 displayMessage("Disculpá, no pude generar una respuesta. Hubo un problema de conexión. Por favor, verificá tu conexión a internet.", 'bot');
             } finally {
                  // Aseguramos que el botón se habilite y el indicador de carga se oculte SIEMPRE
-                 sendButton.disabled = false;
-                 loadingIndicator.classList.remove('active');
+                 // PERO solo si no es una llamada inicial que está en proceso de reintento
+                 if (!isInitialCall || retryCount >= MAX_INITIAL_RETRIES) {
+                    sendButton.disabled = false;
+                    loadingIndicator.classList.remove('active');
+                 }
             }
         };
 
@@ -703,7 +716,8 @@
                 splashScreen.classList.add('hidden');
                 chatContent.classList.add('visible');
                 // La primera llamada a getBotResponse se maneja con reintentos para cold start
-                setTimeout(() => getBotResponse(''), 500); // Trigger welcome message after splash fades
+                // Pasamos true para indicar que es la llamada inicial
+                getBotResponse('', true);
             }, 4000); // Display splash screen for 4 seconds
         };
     </script>
