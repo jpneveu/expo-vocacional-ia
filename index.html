@@ -390,6 +390,7 @@
                 return;
             }
 
+            // For user-initiated messages, always call getBotResponse without initialCall flags
             await getBotResponse(message);
         };
 
@@ -397,21 +398,14 @@
         const delay = ms => new Promise(res => setTimeout(res, ms));
 
         // Function to get bot response from Vercel Serverless Function
-        const getBotResponse = async (userMessage, isInitialCall = false, retryCount = 0) => {
+        // This function now assumes it's a regular call, not the initial one with retries
+        const getBotResponse = async (userMessage) => {
             // Check if running in a local file system or Canvas blob URL
             const isLocalOrCanvas = window.location.protocol === 'file:' || window.location.protocol === 'blob:';
 
             if (isLocalOrCanvas) {
                 displayMessage("Disculpá, la funcionalidad de IA requiere que la aplicación esté desplegada en un servidor (como Vercel) para funcionar. Por favor, desplegá la aplicación y asegurate de que la clave API esté configurada en Vercel.", 'bot');
-                sendButton.disabled = false;
-                loadingIndicator.classList.remove('active');
-                return;
-            }
-
-            // Only set loading state if it's the very first attempt of a call or a user-initiated call
-            if (!isInitialCall || retryCount === 0) {
-                sendButton.disabled = true;
-                loadingIndicator.classList.add('active');
+                return; // Exit the function early
             }
 
             // Construct the prompt based on the current phase and user profile
@@ -628,24 +622,24 @@
                     break;
             }
 
-            // Prepare chat history for the API call
-            let apiChatHistory = [];
+            // Add previous conversation history to the prompt for context
+            let chatHistory = [];
             conversationHistory.forEach(msg => {
-                apiChatHistory.push({ role: msg.sender === 'user' ? 'user' : 'model', parts: [{ text: msg.text }] });
+                chatHistory.push({ role: msg.sender === 'user' ? 'user' : 'model', parts: [{ text: msg.text }] });
             });
-            apiChatHistory.push({ role: "user", parts: [{ text: prompt }] }); // Add the current prompt
+            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
 
             try {
-                // Construct the full API URL.
-                const apiUrl = '/api/chat'; // Siempre usamos la ruta relativa en Vercel
+                const payload = { contents: chatHistory };
+                // La clave API y la URL de la API de Gemini se manejan en api/chat.js
+                const apiUrl = '/api/chat'; // Apuntamos a nuestra función serverless
 
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chatHistory: apiChatHistory, prompt: prompt }) // Pass full history and current prompt
+                    body: JSON.stringify(payload)
                 });
 
-                // Aquí es donde el cambio es crucial: esperamos la respuesta COMPLETA de Gemini
                 const result = await response.json();
 
                 if (response.ok && result.candidates && result.candidates.length > 0 &&
@@ -667,36 +661,63 @@
 
                     // Update phase based on currentPhase and expected user input
                     updatePhase(currentPhase, userMessage, botResponse);
-
+                    return true; // Indicate success
                 } else {
-                    // Si la respuesta no es OK o no tiene la estructura esperada, mostramos un error más específico
+                    // Si la respuesta no es OK o no tiene la estructura esperada, registramos el error
                     const errorMessageText = result.error ? `Error del servidor: ${result.error.message || result.error}` : 'Respuesta inesperada de la IA.';
                     console.error("Error from serverless function or unexpected Gemini response:", result);
-                    
-                    // Solo mostrar el error al usuario si no es una llamada inicial que se va a reintentar
-                    if (!isInitialCall || retryCount >= MAX_INITIAL_RETRIES) {
-                        displayMessage(`Disculpá, no pude generar una respuesta. ${errorMessageText} Por favor, intentá de nuevo más tarde.`, 'bot');
-                    }
+                    return false; // Indicate failure
                 }
             } catch (error) {
                 console.error("Error calling serverless function:", error);
-                // Lógica de reintento solo para la llamada inicial
-                if (isInitialCall && retryCount < MAX_INITIAL_RETRIES) {
-                    console.log(`Reintentando la llamada inicial (${retryCount + 1}/${MAX_INITIAL_RETRIES})...`);
-                    await delay(RETRY_DELAY_MS); // Espera antes de reintentar
-                    getBotResponse(userMessage, isInitialCall, retryCount + 1);
-                    return; // Importante: salir para no ejecutar el finally ni mostrar error prematuro
-                }
-                displayMessage("Disculpá, no pude generar una respuesta. Hubo un problema de conexión. Por favor, verificá tu conexión a internet.", 'bot');
+                return false; // Indicate failure
             } finally {
-                 // Aseguramos que el botón se habilite y el indicador de carga se oculte SIEMPRE
-                 // PERO solo si no es una llamada inicial que está en proceso de reintento
-                 if (!isInitialCall || retryCount >= MAX_INITIAL_RETRIES) {
-                    sendButton.disabled = false;
-                    loadingIndicator.classList.remove('active');
-                 }
+                // El estado de carga se gestiona en startInitialChat o sendMessage
             }
         };
+
+        // Function to handle the initial chat startup with retries
+        const startInitialChat = async () => {
+            const isLocalOrCanvas = window.location.protocol === 'file:' || window.location.protocol === 'blob:';
+            if (isLocalOrCanvas) {
+                displayMessage("Disculpá, la funcionalidad de IA requiere que la aplicación esté desplegada en un servidor (como Vercel) para funcionar. Por favor, desplegá la aplicación y asegurate de que la clave API esté configurada en Vercel.", 'bot');
+                sendButton.disabled = false;
+                loadingIndicator.classList.remove('active');
+                return;
+            }
+
+            sendButton.disabled = true; // Disable button during initial load
+            loadingIndicator.classList.add('active'); // Show loading indicator
+
+            let success = false;
+            for (let i = 0; i <= MAX_INITIAL_RETRIES; i++) {
+                // No limpiar el chat aquí para evitar parpadeos si se reintenta
+                try {
+                    // Call getBotResponse, which now only handles a single request
+                    success = await getBotResponse(''); // userMessage is empty for initial call
+                    if (success) {
+                        break; // Exit loop if successful
+                    }
+                } catch (e) {
+                    // Catch block in getBotResponse already handles console.error
+                }
+
+                if (!success && i < MAX_INITIAL_RETRIES) {
+                    console.log(`Reintentando la llamada inicial (${i + 1}/${MAX_INITIAL_RETRIES})...`);
+                    await delay(RETRY_DELAY_MS);
+                }
+            }
+
+            if (!success) {
+                // Solo mostrar el error si todos los reintentos fallaron
+                displayMessage("Disculpá, no pude generar una respuesta. Hubo un problema de conexión. Por favor, verificá tu conexión a internet.", 'bot');
+            }
+
+            // Siempre restablecer el estado de la UI después de que el proceso de carga inicial esté completo
+            sendButton.disabled = false;
+            loadingIndicator.classList.remove('active');
+        };
+
 
         // Event Listeners
         sendButton.addEventListener('click', () => sendMessage());
@@ -715,9 +736,8 @@
             setTimeout(() => {
                 splashScreen.classList.add('hidden');
                 chatContent.classList.add('visible');
-                // La primera llamada a getBotResponse se maneja con reintentos para cold start
-                // Pasamos true para indicar que es la llamada inicial
-                getBotResponse('', true);
+                // Iniciar el proceso de chat inicial con reintentos
+                startInitialChat();
             }, 4000); // Display splash screen for 4 seconds
         };
     </script>
