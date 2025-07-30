@@ -387,8 +387,8 @@
             }
 
             await getBotResponse(message);
-            sendButton.disabled = false;
-            loadingIndicator.classList.remove('active');
+            // sendButton.disabled = false; // Moved to finally block
+            // loadingIndicator.classList.remove('active'); // Moved to finally block
         };
 
         // Function to get bot response from Vercel Serverless Function
@@ -398,8 +398,8 @@
 
             if (isLocalOrCanvas) {
                 displayMessage("Disculpá, la funcionalidad de IA requiere que la aplicación esté desplegada en un servidor (como Vercel) para funcionar. Por favor, desplegá la aplicación y asegurate de que la clave API esté configurada en Vercel.", 'bot');
-                sendButton.disabled = false;
-                loadingIndicator.classList.remove('active');
+                // sendButton.disabled = false; // Moved to finally block
+                // loadingIndicator.classList.remove('active'); // Moved to finally block
                 return; // Exit the function early
             }
 
@@ -658,13 +658,16 @@
                     updatePhase(currentPhase, userMessage, botResponse);
 
                 } else {
-                    console.error("Error from serverless function or unexpected Gemini response:", result.error || "Unknown error", result);
-                    displayMessage("Disculpá, no pude generar una respuesta. Hubo un problema con el servidor. Por favor, intentá de nuevo más tarde.", 'bot');
+                    // Si la respuesta no es OK o no tiene la estructura esperada, mostramos un error más específico
+                    const errorMessageText = result.error ? `Error del servidor: ${result.error.message || result.error}` : 'Respuesta inesperada de la IA.';
+                    console.error("Error from serverless function or unexpected Gemini response:", result);
+                    displayMessage(`Disculpá, no pude generar una respuesta. ${errorMessageText} Por favor, intentá de nuevo más tarde.`, 'bot');
                 }
             } catch (error) {
                 console.error("Error calling serverless function:", error);
                 displayMessage("Disculpá, no pude generar una respuesta. Hubo un problema de conexión. Por favor, verificá tu conexión a internet.", 'bot');
             } finally {
+                 // Aseguramos que el botón se habilite y el indicador de carga se oculte SIEMPRE
                  sendButton.disabled = false;
                  loadingIndicator.classList.remove('active');
             }
