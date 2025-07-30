@@ -262,6 +262,11 @@
         let selectedArea = ''; // To store the area selected by the user
         let expectingConfirmation = false; // New state to manage confirmation buttons
 
+        // Variables para el manejo de reintentos en la llamada inicial
+        let initialCallRetries = 0;
+        const MAX_INITIAL_RETRIES = 2; // Número máximo de reintentos para la llamada inicial
+        const RETRY_DELAY_MS = 1500; // Retraso en milisegundos entre reintentos
+
         // Constants for emojis
         const EMOJI_WELCOME = '👋';
         const EMOJI_GUIDE_QUESTION = '🧭';
@@ -665,6 +670,13 @@
                 }
             } catch (error) {
                 console.error("Error calling serverless function:", error);
+                // Lógica de reintento solo para la llamada inicial
+                if (currentPhase === 'Fase 0' && !userMessage && initialCallRetries < MAX_INITIAL_RETRIES) {
+                    initialCallRetries++;
+                    console.log(`Reintentando la llamada inicial (${initialCallRetries}/${MAX_INITIAL_RETRIES})...`);
+                    setTimeout(() => getBotResponse(''), RETRY_DELAY_MS);
+                    return; // No mostrar el error todavía, solo reintentar
+                }
                 displayMessage("Disculpá, no pude generar una respuesta. Hubo un problema de conexión. Por favor, verificá tu conexión a internet.", 'bot');
             } finally {
                  // Aseguramos que el botón se habilite y el indicador de carga se oculte SIEMPRE
@@ -690,6 +702,7 @@
             setTimeout(() => {
                 splashScreen.classList.add('hidden');
                 chatContent.classList.add('visible');
+                // La primera llamada a getBotResponse se maneja con reintentos para cold start
                 setTimeout(() => getBotResponse(''), 500); // Trigger welcome message after splash fades
             }, 4000); // Display splash screen for 4 seconds
         };
