@@ -5,14 +5,17 @@
 export default async function handler(request, response) {
     // 1. Solo permitir solicitudes POST por seguridad
     if (request.method !== 'POST') {
-        return response.status(405).json({ message: 'Método no permitido' });
+        return response.status(405).json({ message: 'Method Not Allowed' });
     }
 
-    // 2. Obtener el historial de chat y el prompt del cuerpo de la solicitud
-    const { chatHistory, prompt } = request.body;
+    // 2. Obtener el prompt y el historial de chat del cuerpo de la solicitud
+    // ¡CAMBIO CLAVE AQUÍ! Esperamos 'userPrompt' y 'chatHistory'
+    const { userPrompt, chatHistory } = request.body;
 
-    if (!prompt && (!chatHistory || chatHistory.length === 0)) {
-        return response.status(400).json({ error: 'Prompt o historial de chat missing.' });
+    // Verificar que al menos el prompt principal esté presente
+    if (!userPrompt) {
+        console.error('Error: userPrompt is missing in the request body.');
+        return response.status(400).json({ error: 'El prompt principal está vacío o falta.' });
     }
 
     // 3. Obtener la clave API de las variables de entorno de Vercel
@@ -26,8 +29,14 @@ export default async function handler(request, response) {
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
     try {
-        // Preparar el payload para la API de Gemini
-        const payload = { contents: chatHistory }; // Usamos el historial completo para el contexto
+        // Construir el payload para la API de Gemini
+        // El prompt principal va primero, luego el historial de chat
+        const contents = [{ role: "user", parts: [{ text: userPrompt }] }];
+        if (chatHistory && Array.isArray(chatHistory)) {
+            contents.push(...chatHistory); // Añadir el historial si existe
+        }
+
+        const payload = { contents: contents };
 
         // 4. Realizar la llamada server-to-server a la API de Gemini
         const geminiResponse = await fetch(apiUrl, {
@@ -42,7 +51,6 @@ export default async function handler(request, response) {
         if (!geminiResponse.ok) {
             const errorText = await geminiResponse.text();
             console.error("Error de la API de Gemini:", errorText);
-            // Intentamos parsear el error para dar más detalle si es JSON
             try {
                 const errorJson = JSON.parse(errorText);
                 return response.status(geminiResponse.status).json({ error: errorJson.error.message || 'Error desconocido de la API de Gemini' });
@@ -51,11 +59,10 @@ export default async function handler(request, response) {
             }
         }
 
-        const result = await geminiResponse.json();
-
+        const data = await geminiResponse.json();
+        
         // 5. Enviar la respuesta completa de Gemini de vuelta al frontend
-        // ¡CAMBIO CLAVE AQUÍ! Devolvemos 'result' completo, no solo 'result.text'
-        return response.status(200).json(result);
+        return response.status(200).json(data);
 
     } catch (error) {
         console.error("Error interno del servidor:", error);
