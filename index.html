@@ -622,7 +622,7 @@
                 // but the API call itself will only succeed once deployed to Vercel and the URL is updated.
                 const apiUrl = (window.location.protocol === 'http:' || window.location.protocol === 'https:')
                     ? '/api/chat'
-                    : 'https://your-vercel-app-url.vercel.app/api/chat'; // IMPORTANT: Reemplaza con la URL real de tu despliegue en Vercel después de desplegar.
+                    : 'https://expo-vocacional-ia.vercel.app'; // IMPORTANT: Reemplaza con la URL real de tu despliegue en Vercel después de desplegar.
 
                 const response = await fetch(apiUrl, {
                     method: 'POST',
