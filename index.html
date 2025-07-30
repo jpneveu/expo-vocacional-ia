@@ -405,12 +405,12 @@
 
             if (isLocalOrCanvas) {
                 displayMessage("Disculpá, la funcionalidad de IA requiere que la aplicación esté desplegada en un servidor (como Vercel) para funcionar. Por favor, desplegá la aplicación y asegurate de que la clave API esté configurada en Vercel.", 'bot');
-                return; // Exit the function early
+                return null; // Return null to indicate failure in Canvas
             }
 
             // Construct the prompt based on the current phase and user profile
             let prompt = `
-            Eres **Explora tu vocación con IA - Expo carreras 2026**, un asistente vocacional, diseñado para guiar a estudiantes de 5º y 6º año de la secundaria en la provincia de La Pampa, Argentina. Tu misión es facilitar un proceso de autodescubrimiento y reflexión que conecte la identidad personal del estudiante con la exploración de la oferta académica superior de manera accesible, clara y profesional. Eres una herramienta de apoyo para el primer paso de la orientación, no un reemplazo de un orientador humano.
+            Eres **Explora tu vocación con IA - Expo carreras 2026**, un asistente vocacional, diseñado para guiar a estudiantes de 5º y 6º año de la secundaria en la provincia de La Pampa, Argentina. Tu misión es facilitar un proceso de autodiscovery y reflexión que conecte la identidad personal del estudiante con la exploración de la oferta académica superior de manera accesible, clara y profesional. Eres una herramienta de apoyo para el primer paso de la orientación, no un reemplazo de un orientador humano.
 
             Tu personalidad es la de un guía paciente, alentador, curioso y objetivo. La interacción debe sentirse como una conversación estructurada pero natural, que genera confianza y seguridad.
 
@@ -630,8 +630,12 @@
             chatHistory.push({ role: "user", parts: [{ text: prompt }] });
 
             try {
-                const payload = { contents: chatHistory };
-                // La clave API y la URL de la API de Gemini se manejan en api/chat.js
+                // Aquí el payload se construye para enviar el prompt y el historial por separado
+                const payload = { 
+                    userPrompt: prompt, // El prompt principal
+                    chatHistory: chatHistory // El historial de conversación
+                };
+                
                 const apiUrl = '/api/chat'; // Apuntamos a nuestra función serverless
 
                 const response = await fetch(apiUrl, {
@@ -656,21 +660,15 @@
                         showConfirmationButtons(false); // Ensure buttons are hidden if not a confirmation
                     }
 
-                    displayMessage(botResponse, 'bot');
-                    conversationHistory.push({ text: botResponse, sender: 'bot' });
-
-                    // Update phase based on currentPhase and expected user input
-                    updatePhase(currentPhase, userMessage, botResponse);
-                    return true; // Indicate success
+                    return botResponse; // Return the actual response text on success
                 } else {
-                    // Si la respuesta no es OK o no tiene la estructura esperada, registramos el error
                     const errorMessageText = result.error ? `Error del servidor: ${result.error.message || result.error}` : 'Respuesta inesperada de la IA.';
                     console.error("Error from serverless function or unexpected Gemini response:", result);
-                    return false; // Indicate failure
+                    return null; // Indicate failure
                 }
             } catch (error) {
                 console.error("Error calling serverless function:", error);
-                return false; // Indicate failure
+                return null; // Indicate failure
             } finally {
                 // El estado de carga se gestiona en startInitialChat o sendMessage
             }
@@ -689,31 +687,34 @@
             sendButton.disabled = true; // Disable button during initial load
             loadingIndicator.classList.add('active'); // Show loading indicator
 
-            let success = false;
+            let finalBotResponse = null;
             for (let i = 0; i <= MAX_INITIAL_RETRIES; i++) {
-                // No limpiar el chat aquí para evitar parpadeos si se reintenta
                 try {
-                    // Call getBotResponse, which now only handles a single request
-                    success = await getBotResponse(''); // userMessage is empty for initial call
-                    if (success) {
+                    // La llamada inicial no tiene userMessage, pero necesita el prompt de sistema
+                    // getBotResponse construirá el prompt de sistema basado en currentPhase
+                    const responseText = await getBotResponse(''); 
+                    if (responseText) {
+                        finalBotResponse = responseText;
                         break; // Exit loop if successful
                     }
                 } catch (e) {
-                    // Catch block in getBotResponse already handles console.error
+                    // getBotResponse already logs errors, no need to re-log here
                 }
 
-                if (!success && i < MAX_INITIAL_RETRIES) {
+                if (!finalBotResponse && i < MAX_INITIAL_RETRIES) {
                     console.log(`Reintentando la llamada inicial (${i + 1}/${MAX_INITIAL_RETRIES})...`);
                     await delay(RETRY_DELAY_MS);
                 }
             }
 
-            if (!success) {
-                // Solo mostrar el error si todos los reintentos fallaron
+            if (finalBotResponse) {
+                displayMessage(finalBotResponse, 'bot');
+                conversationHistory.push({ text: finalBotResponse, sender: 'bot' });
+                updatePhase(currentPhase, '', finalBotResponse); 
+            } else {
                 displayMessage("Disculpá, no pude generar una respuesta. Hubo un problema de conexión. Por favor, verificá tu conexión a internet.", 'bot');
             }
 
-            // Siempre restablecer el estado de la UI después de que el proceso de carga inicial esté completo
             sendButton.disabled = false;
             loadingIndicator.classList.remove('active');
         };
@@ -736,7 +737,6 @@
             setTimeout(() => {
                 splashScreen.classList.add('hidden');
                 chatContent.classList.add('visible');
-                // Iniciar el proceso de chat inicial con reintentos
                 startInitialChat();
             }, 4000); // Display splash screen for 4 seconds
         };
