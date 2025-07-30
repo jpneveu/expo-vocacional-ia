@@ -262,10 +262,6 @@
         let selectedArea = ''; // To store the area selected by the user
         let expectingConfirmation = false; // New state to manage confirmation buttons
 
-        // Variables para el manejo de reintentos en la llamada inicial
-        const MAX_INITIAL_RETRIES = 2; // Número máximo de reintentos para la llamada inicial
-        const RETRY_DELAY_MS = 1500; // Retraso en milisegundos entre reintentos
-
         // Constants for emojis
         const EMOJI_WELCOME = '👋';
         const EMOJI_GUIDE_QUESTION = '🧭';
@@ -300,11 +296,9 @@
             }
 
             // Simple Markdown parsing for bold text (**)
-            // This replaces **text** with <strong>text</strong>
             let parsedMessage = message.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
 
             // Parse unordered list items (- Item)
-            // This regex also handles nested unordered lists (e.g., "  - Sub-item")
             parsedMessage = parsedMessage.replace(/^( *)[*-] (.*)$/gm, (match, spaces, content) => {
                 const indentLevel = spaces.length / 2; // Assuming 2 spaces per indent level
                 return `<li style="margin-left: ${indentLevel * 1.5}rem;">${content}</li>`;
@@ -316,7 +310,6 @@
             }
 
             // Parse ordered list items (1. Item)
-            // This regex captures lines starting with a number followed by a dot and a space
             let orderedListHtml = '';
             const orderedListItems = parsedMessage.match(/^\d+\. (.*)$/gm);
             if (orderedListItems) {
@@ -325,16 +318,15 @@
                     orderedListHtml += `<li>${item.replace(/^\d+\. /, '')}</li>`;
                 });
                 orderedListHtml += '</ol>';
-                // Replace the original markdown list with the HTML list
-                parsedMessage = parsedMessage.replace(/^\d+\. (.*)$/gm, '').trim(); // Remove original markdown list lines
-                parsedMessage += orderedListHtml; // Append the new HTML ordered list
+                parsedMessage = parsedMessage.replace(/^\d+\. (.*)$/gm, '').trim(); 
+                parsedMessage += orderedListHtml; 
             }
 
             // Parse Markdown links [text](url)
             parsedMessage = parsedMessage.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" class="text-blue-600 hover:underline">$1</a>');
 
 
-            messageBubble.innerHTML = parsedMessage; // Use innerHTML to render parsed Markdown
+            messageBubble.innerHTML = parsedMessage; 
             chatMessagesDiv.appendChild(messageBubble);
             scrollToBottom();
         };
@@ -348,11 +340,11 @@
         const showConfirmationButtons = (show) => {
             if (show) {
                 confirmationButtonsDiv.style.display = 'flex';
-                textInputContainer.style.display = 'none'; // Hide regular input
+                textInputContainer.style.display = 'none'; 
                 expectingConfirmation = true;
             } else {
                 confirmationButtonsDiv.style.display = 'none';
-                textInputContainer.style.display = 'flex'; // Show regular input
+                textInputContainer.style.display = 'flex'; 
                 expectingConfirmation = false;
             }
         };
@@ -366,8 +358,9 @@
             selectedArea = '';
             chatMessagesDiv.innerHTML = '';
             displayMessage(`${EMOJI_RESET} Reiniciando la conversación...`, 'bot');
-            showConfirmationButtons(false); // Hide buttons on reset
-            // No llamar a getBotResponse aquí, ya que el flujo inicial lo manejará
+            showConfirmationButtons(false); 
+            // After reset, display the initial static message again
+            setTimeout(() => displayStaticWelcomeMessage(), 1000); 
         };
 
         // Function to send message
@@ -378,9 +371,9 @@
             displayMessage(message, 'user');
             conversationHistory.push({ text: message, sender: 'user' });
             userInput.value = '';
-            sendButton.disabled = true; // Disable button while processing
-            loadingIndicator.classList.add('active'); // Show loading indicator
-            showConfirmationButtons(false); // Hide buttons after any message is sent
+            sendButton.disabled = true; 
+            loadingIndicator.classList.add('active'); 
+            showConfirmationButtons(false); 
 
             // Check for reset command
             if (message.toLowerCase() === 'empezar de nuevo' || message.toLowerCase() === 'reset') {
@@ -390,27 +383,24 @@
                 return;
             }
 
-            // For user-initiated messages, always call getBotResponse without initialCall flags
             await getBotResponse(message);
+            sendButton.disabled = false;
+            loadingIndicator.classList.remove('active');
         };
 
-        // Helper function for delay
-        const delay = ms => new Promise(res => setTimeout(res, ms));
-
         // Function to get bot response from Vercel Serverless Function
-        // This function now assumes it's a regular call, not the initial one with retries
         const getBotResponse = async (userMessage) => {
             // Check if running in a local file system or Canvas blob URL
             const isLocalOrCanvas = window.location.protocol === 'file:' || window.location.protocol === 'blob:';
 
             if (isLocalOrCanvas) {
                 displayMessage("Disculpá, la funcionalidad de IA requiere que la aplicación esté desplegada en un servidor (como Vercel) para funcionar. Por favor, desplegá la aplicación y asegurate de que la clave API esté configurada en Vercel.", 'bot');
-                return null; // Return null to indicate failure in Canvas
+                return; 
             }
 
             // Construct the prompt based on the current phase and user profile
             let prompt = `
-            Eres **Explora tu vocación con IA - Expo carreras 2026**, un asistente vocacional, diseñado para guiar a estudiantes de 5º y 6º año de la secundaria en la provincia de La Pampa, Argentina. Tu misión es facilitar un proceso de autodiscovery y reflexión que conecte la identidad personal del estudiante con la exploración de la oferta académica superior de manera accesible, clara y profesional. Eres una herramienta de apoyo para el primer paso de la orientación, no un reemplazo de un orientador humano.
+            Eres **Explora tu vocación con IA - Expo carreras 2026**, un asistente vocacional, diseñado para guiar a estudiantes de 5º y 6º año de la secundaria en la provincia de La Pampa, Argentina. Tu misión es facilitar un proceso de autodescubrimiento y reflexión que conecte la identidad personal del estudiante con la exploración de la oferta académica superior de manera accesible, clara y profesional. Eres una herramienta de apoyo para el primer paso de la orientación, no un reemplazo de un orientador humano.
 
             Tu personalidad es la de un guía paciente, alentador, curioso y objetivo. La interacción debe sentirse como una conversación estructurada pero natural, que genera confianza y seguridad.
 
@@ -623,26 +613,35 @@
             }
 
             // Add previous conversation history to the prompt for context
-            let chatHistory = [];
+            // Construimos el historial de chat para Gemini, incluyendo el prompt actual del usuario
+            let chatForGemini = [];
             conversationHistory.forEach(msg => {
-                chatHistory.push({ role: msg.sender === 'user' ? 'user' : 'model', parts: [{ text: msg.text }] });
+                chatForGemini.push({ role: msg.sender === 'user' ? 'user' : 'model', parts: [{ text: msg.text }] });
             });
-            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+            // El prompt del usuario actual se añade como la última parte de la conversación
+            chatForGemini.push({ role: "user", parts: [{ text: prompt }] });
 
             try {
-                // Aquí el payload se construye para enviar el prompt y el historial por separado
+                // Aquí el payload se construye para enviar el prompt principal y el historial de chat
                 const payload = { 
-                    userPrompt: prompt, // El prompt principal
-                    chatHistory: chatHistory // El historial de conversación
+                    userPrompt: prompt, // El prompt principal que se le pide a Gemini
+                    chatHistory: chatForGemini // El historial completo de la conversación para contexto
                 };
                 
                 const apiUrl = '/api/chat'; // Apuntamos a nuestra función serverless
 
+                // Implementar un timeout para la llamada fetch
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 segundos de timeout
+
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify(payload),
+                    signal: controller.signal // Asignar el signal del AbortController
                 });
+
+                clearTimeout(timeoutId); // Limpiar el timeout si la fetch se completa a tiempo
 
                 const result = await response.json();
 
@@ -667,7 +666,11 @@
                     return null; // Indicate failure
                 }
             } catch (error) {
-                console.error("Error calling serverless function:", error);
+                if (error.name === 'AbortError') {
+                    console.error("Error de conexión: La solicitud ha excedido el tiempo de espera (timeout).", error);
+                } else {
+                    console.error("Error llamando a la función serverless:", error);
+                }
                 return null; // Indicate failure
             } finally {
                 // El estado de carga se gestiona en startInitialChat o sendMessage
@@ -688,6 +691,8 @@
             loadingIndicator.classList.add('active'); // Show loading indicator
 
             let finalBotResponse = null;
+            let callSuccessful = false;
+
             for (let i = 0; i <= MAX_INITIAL_RETRIES; i++) {
                 try {
                     // La llamada inicial no tiene userMessage, pero necesita el prompt de sistema
@@ -695,23 +700,26 @@
                     const responseText = await getBotResponse(''); 
                     if (responseText) {
                         finalBotResponse = responseText;
+                        callSuccessful = true;
                         break; // Exit loop if successful
                     }
                 } catch (e) {
-                    // getBotResponse already logs errors, no need to re-log here
+                    // getBotResponse ya maneja los console.error
                 }
 
-                if (!finalBotResponse && i < MAX_INITIAL_RETRIES) {
+                if (!callSuccessful && i < MAX_INITIAL_RETRIES) {
                     console.log(`Reintentando la llamada inicial (${i + 1}/${MAX_INITIAL_RETRIES})...`);
                     await delay(RETRY_DELAY_MS);
                 }
             }
 
-            if (finalBotResponse) {
+            if (callSuccessful) {
+                // ONLY display the message ONCE after a successful response is obtained
                 displayMessage(finalBotResponse, 'bot');
                 conversationHistory.push({ text: finalBotResponse, sender: 'bot' });
                 updatePhase(currentPhase, '', finalBotResponse); 
             } else {
+                // Only display error if all retries failed
                 displayMessage("Disculpá, no pude generar una respuesta. Hubo un problema de conexión. Por favor, verificá tu conexión a internet.", 'bot');
             }
 
